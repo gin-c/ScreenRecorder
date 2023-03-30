@@ -7,17 +7,32 @@ android {
         applicationId "net.yrom.screenrecorder.demo"
         minSdkVersion 21
         targetSdkVersion 28
-        versionCode 15
-        versionName '2.4.2'
+        versionCode app_version_code as int
+        versionName app_version_name
+
+        def createTime = new Date().format("YYYY-MM-dd", TimeZone.getTimeZone("GMT+08:00"))
+        def name = app_name.replace(" ", "")
+        setProperty("archivesBaseName", "${name}_V${app_version_name}_N${app_version_code}_${createTime}")
     }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+    signingConfigs {
+        general {
+            storeFile file(KEYPATH)
+            storePassword KEYPASS
+            keyAlias KEYSTOREALIAS
+            keyPassword KEYPASS
+            v1SigningEnabled true
+            v2SigningEnabled true
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
+            signingConfig signingConfigs.general
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }

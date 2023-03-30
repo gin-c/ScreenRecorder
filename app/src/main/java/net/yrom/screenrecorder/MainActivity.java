@@ -41,6 +41,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.StrictMode;
 import android.preference.PreferenceManager;
+import android.provider.Settings;
 import android.util.Log;
 import android.util.Range;
 import android.view.View;
@@ -236,7 +237,7 @@ public class MainActivity extends Activity {
         if (mVirtualDisplay == null) {
             mVirtualDisplay = mediaProjection.createVirtualDisplay("ScreenRecorder-display0",
                     config.width, config.height, 1 /*dpi*/,
-                    DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                     null /*surface*/, null, null);
         } else {
             // resize if size not matched
@@ -282,7 +283,7 @@ public class MainActivity extends Activity {
                 framerate, iframe, codec, VIDEO_AVC, profileLevel);
     }
 
-    private static File getSavingDir() {
+    private File getSavingDir() {
         return new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
                 "Screenshots");
     }
@@ -414,6 +415,10 @@ public class MainActivity extends Activity {
 
     @TargetApi(M)
     private void requestPermissions() {
+        if (!Settings.canDrawOverlays(this)) {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+        }
         String[] permissions = mAudioToggle.isChecked()
                 ? new String[]{WRITE_EXTERNAL_STORAGE, RECORD_AUDIO}
                 : new String[]{WRITE_EXTERNAL_STORAGE};
@@ -918,5 +923,4 @@ public class MainActivity extends Activity {
             }
         }
     };
-
 }
