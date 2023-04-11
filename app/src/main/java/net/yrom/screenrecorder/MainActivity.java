@@ -39,6 +39,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.os.StrictMode;
 import android.preference.PreferenceManager;
 import android.provider.Settings;
@@ -113,7 +114,6 @@ public class MainActivity extends Activity {
             SpinnerAdapter codecsAdapter = createCodecsAdapter(mAvcCodecInfos);
             mVideoCodec.setAdapter(codecsAdapter);
             restoreSelections(mVideoCodec, mVieoResolution, mVideoFramerate, mIFrameInterval, mVideoBitrate);
-
         });
         Utils.findEncodersByTypeAsync(AUDIO_AAC, infos -> {
             logCodecInfos(infos, AUDIO_AAC);
@@ -413,11 +413,26 @@ public class MainActivity extends Activity {
         stopRecorder();
     }
 
+
+    private boolean hasLoadBatPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return true;
+        }
+        PowerManager powerManager = (PowerManager) this.getSystemService(Context.POWER_SERVICE);
+        return powerManager.isIgnoringBatteryOptimizations(this.getPackageName());
+    }
+
     @TargetApi(M)
     private void requestPermissions() {
         if (!Settings.canDrawOverlays(this)) {
             Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
             startActivity(intent);
+            return;
+        }
+        if (!hasLoadBatPermission()) {
+            Intent intent = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+            this.startActivity(intent);
+            return;
         }
         String[] permissions = mAudioToggle.isChecked()
                 ? new String[]{WRITE_EXTERNAL_STORAGE, RECORD_AUDIO}

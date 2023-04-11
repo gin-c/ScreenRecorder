@@ -26,5 +26,7 @@ https://github.com/yrom/ScreenRecorder
 
 - 保证可以录屏
 
+## <font color="red">不允许</font>电量优化
+- 防止在锁屏上10秒之后<b>无法录屏</b>
 
 # 本项目佛系维护，提交需求看心情适配。
