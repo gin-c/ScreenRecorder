@@ -15,21 +15,32 @@
  */
 package net.yrom.screenrecorder;
 
+import android.Manifest;
+import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
+import android.graphics.BitmapFactory;
 import android.graphics.Point;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
+import android.media.AudioAttributes;
+import android.media.AudioPlaybackCaptureConfiguration;
 import android.media.MediaCodecInfo;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
@@ -38,6 +49,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
+import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.os.StrictMode;
@@ -62,17 +74,23 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
+import static android.Manifest.permission.FOREGROUND_SERVICE;
+import static android.Manifest.permission.READ_EXTERNAL_STORAGE;
 import static android.Manifest.permission.RECORD_AUDIO;
 import static android.Manifest.permission.WRITE_EXTERNAL_STORAGE;
 import static android.os.Build.VERSION_CODES.M;
 import static net.yrom.screenrecorder.ScreenRecorder.AUDIO_AAC;
 import static net.yrom.screenrecorder.ScreenRecorder.VIDEO_AVC;
 
+import androidx.core.app.ActivityCompat;
+import androidx.core.app.NotificationCompat;
+import androidx.core.content.ContextCompat;
+
 public class MainActivity extends Activity {
+    public static final String TAG = "MainActivity";
     private static final int REQUEST_MEDIA_PROJECTION = 1;
     private static final int REQUEST_PERMISSIONS = 2;
     // members below will be initialized in onCreate()
-    private MediaProjectionManager mMediaProjectionManager;
     private Button mButton;
     private ToggleButton mAudioToggle;
     private NamedSpinner mVieoResolution;
@@ -89,23 +107,53 @@ public class MainActivity extends Activity {
     private NamedSpinner mOrientation;
     private MediaCodecInfo[] mAvcCodecInfos; // avc codecs
     private MediaCodecInfo[] mAacCodecInfos; // aac codecs
-    private Notifications mNotifications;
+    Notification mNotification = null;
+    //    private Notifications mNotifications;
+    Intent captureIntent = null;
+    private IRecordCtrl recordCtrl = new RecordCtrl();
+
+    NotificationCompat.Builder notificationBuilder;
+    NotificationManager notificationManager;
+    private String NOTIFICATION_CHANNEL_ID = "ChannelId";
+    private String NOTIFICATION_CHANNEL_NAME = "Channel";
+    private String NOTIFICATION_CHANNEL_DESC = "ChannelDescription";
+    private int NOTIFICATION_ID = 1000;
+
+    private static final String ONGING_NOTIFICATION_TICKER = "RecorderApp";
+
+    private static final int ALL_PERMISSIONS_PERMISSION_CODE = 1000;
+    private String[] appPermission = {WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE, RECORD_AUDIO, FOREGROUND_SERVICE,};
+
+    /*
+     * 检查权限获取
+     *
+     * */
+    private boolean checkAndRequestPermissions() {
+        List<String> listPermissionsNeeded = new ArrayList<>();
+        for (String permission : appPermission) {
+            if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
+                listPermissionsNeeded.add(permission);
+            }
+        }
+        if (!listPermissionsNeeded.isEmpty()) {
+            ActivityCompat.requestPermissions(this, listPermissionsNeeded.toArray(new String[listPermissionsNeeded.size()]), ALL_PERMISSIONS_PERMISSION_CODE);
+            return false;
+        }
+        return true;
+    }
 
     /**
      * <b>NOTE:</b>
      * {@code ScreenRecorder} should run in background Service
      * instead of a foreground Activity in this demonstrate.
      */
-    private ScreenRecorder mRecorder;
-    private MediaProjection mMediaProjection;
-    private VirtualDisplay mVirtualDisplay;
 
+    @SuppressLint("UnspecifiedImmutableFlag")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        mMediaProjectionManager = (MediaProjectionManager) getApplicationContext().getSystemService(MEDIA_PROJECTION_SERVICE);
-        mNotifications = new Notifications(getApplicationContext());
+//        mNotifications = new Notifications(getApplicationContext());
         bindViews();
 
         Utils.findEncodersByTypeAsync(VIDEO_AVC, infos -> {
@@ -125,6 +173,26 @@ public class MainActivity extends Activity {
         mAudioToggle.setChecked(
                 PreferenceManager.getDefaultSharedPreferences(getApplicationContext())
                         .getBoolean(getResources().getResourceEntryName(mAudioToggle.getId()), true));
+
+
+        Intent notification = new Intent(this, MediaCaptureService.class);
+        PendingIntent pendingIntent;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            pendingIntent = PendingIntent.getActivity(this, 0, notification, PendingIntent.FLAG_IMMUTABLE);
+        } else {
+            pendingIntent = PendingIntent.getActivity(this, 0, notification, PendingIntent.FLAG_ONE_SHOT);
+        }
+        notificationBuilder = new NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID).setLargeIcon(BitmapFactory.decodeResource(getResources(), R.drawable.ic_launcher_foreground))
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentTitle("Starting Service")
+                .setContentText("Starting monitoring service")
+                .setTicker(ONGING_NOTIFICATION_TICKER)
+                .setContentIntent(pendingIntent);
+        mNotification = notificationBuilder.build();
+        NotificationChannel channel = new NotificationChannel(NOTIFICATION_CHANNEL_ID, NOTIFICATION_CHANNEL_NAME, NotificationManager.IMPORTANCE_DEFAULT);
+        channel.setDescription(NOTIFICATION_CHANNEL_DESC);
+        notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        notificationManager.createNotificationChannel(channel);
     }
 
     @Override
@@ -147,107 +215,22 @@ public class MainActivity extends Activity {
             // NOTE: Should pass this result data into a Service to run ScreenRecorder.
             // The following codes are merely exemplary.
 
-            MediaProjection mediaProjection = mMediaProjectionManager.getMediaProjection(resultCode, data);
-            if (mediaProjection == null) {
-                Log.e("@@", "media projection is null");
-                return;
+//            mMediaProjection.registerCallback(mProjectionCallback, new Handler());
+//            startCapturing(mediaProjection);
+//            RecordCtrl.startRecord(data);
+            if (resultCode == RESULT_OK) {
+                captureIntent = data;
+                startCapturing();
             }
-
-            mMediaProjection = mediaProjection;
-            mMediaProjection.registerCallback(mProjectionCallback, new Handler());
-            startCapturing(mediaProjection);
         }
     }
 
-    private void startCapturing(MediaProjection mediaProjection) {
-        VideoEncodeConfig video = createVideoConfig();
-        AudioEncodeConfig audio = createAudioConfig(); // audio can be null
-        if (video == null) {
-            toast(getString(R.string.create_screenRecorder_failure));
-            return;
-        }
-
-        File dir = getSavingDir();
-        if (!dir.exists() && !dir.mkdirs()) {
-            cancelRecorder();
-            return;
-        }
-        SimpleDateFormat format = new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US);
-        final File file = new File(dir, "Screenshots-" + format.format(new Date())
-                + "-" + video.width + "x" + video.height + ".mp4");
-        Log.d("@@", "Create recorder with :" + video + " \n " + audio + "\n " + file);
-        mRecorder = newRecorder(mediaProjection, video, audio, file);
+    private void startCapturing() {
         if (hasPermissions()) {
             startRecorder();
         } else {
             cancelRecorder();
         }
-    }
-
-    private MediaProjection.Callback mProjectionCallback = new MediaProjection.Callback() {
-        @Override
-        public void onStop() {
-            if (mRecorder != null) {
-                stopRecorder();
-            }
-        }
-    };
-
-    private ScreenRecorder newRecorder(MediaProjection mediaProjection, VideoEncodeConfig video,
-                                       AudioEncodeConfig audio, File output) {
-        final VirtualDisplay display = getOrCreateVirtualDisplay(mediaProjection, video);
-        ScreenRecorder r = new ScreenRecorder(video, audio, display, output.getAbsolutePath());
-        r.setCallback(new ScreenRecorder.Callback() {
-            long startTime = 0;
-
-            @Override
-            public void onStop(Throwable error) {
-                runOnUiThread(() -> stopRecorder());
-                if (error != null) {
-                    toast("Recorder error ! See logcat for more details");
-                    error.printStackTrace();
-                    output.delete();
-                } else {
-                    Intent intent = new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
-                            .addCategory(Intent.CATEGORY_DEFAULT)
-                            .setData(Uri.fromFile(output));
-                    sendBroadcast(intent);
-                }
-            }
-
-            @Override
-            public void onStart() {
-                mNotifications.recording(0);
-            }
-
-            @Override
-            public void onRecording(long presentationTimeUs) {
-                if (startTime <= 0) {
-                    startTime = presentationTimeUs;
-                }
-                long time = (presentationTimeUs - startTime) / 1000;
-                mNotifications.recording(time);
-            }
-        });
-        return r;
-    }
-
-
-    private VirtualDisplay getOrCreateVirtualDisplay(MediaProjection mediaProjection, VideoEncodeConfig config) {
-        if (mVirtualDisplay == null) {
-            mVirtualDisplay = mediaProjection.createVirtualDisplay("ScreenRecorder-display0",
-                    config.width, config.height, 1 /*dpi*/,
-                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                    null /*surface*/, null, null);
-        } else {
-            // resize if size not matched
-            Point size = new Point();
-            mVirtualDisplay.getDisplay().getSize(size);
-            if (size.x != config.width || size.y != config.height) {
-                mVirtualDisplay.resize(config.width, config.height, 1);
-            }
-        }
-        return mVirtualDisplay;
     }
 
     private AudioEncodeConfig createAudioConfig() {
@@ -283,10 +266,6 @@ public class MainActivity extends Activity {
                 framerate, iframe, codec, VIDEO_AVC, profileLevel);
     }
 
-    private File getSavingDir() {
-        return new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
-                "Screenshots");
-    }
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
@@ -308,20 +287,15 @@ public class MainActivity extends Activity {
         super.onDestroy();
         saveSelections();
         stopRecorder();
-        if (mVirtualDisplay != null) {
-            mVirtualDisplay.setSurface(null);
-            mVirtualDisplay.release();
-            mVirtualDisplay = null;
-        }
-        if (mMediaProjection != null) {
-            mMediaProjection.unregisterCallback(mProjectionCallback);
-            mMediaProjection.stop();
-            mMediaProjection = null;
+        if (recordCtrl != null) {
+            recordCtrl.destroy();
+            recordCtrl = null;
         }
     }
 
     private void requestMediaProjection() {
-        Intent captureIntent = mMediaProjectionManager.createScreenCaptureIntent();
+        MediaProjectionManager manager = (MediaProjectionManager) getApplicationContext().getSystemService(MEDIA_PROJECTION_SERVICE);
+        Intent captureIntent = manager.createScreenCaptureIntent();
         startActivityForResult(captureIntent, REQUEST_MEDIA_PROJECTION);
     }
 
@@ -370,13 +344,13 @@ public class MainActivity extends Activity {
     }
 
     private void onButtonClick(View v) {
-        if (mRecorder != null) {
+        if (recordCtrl.getRecordPath() != null) {
             stopRecordingAndOpenFile(v.getContext());
         } else if (hasPermissions()) {
-            if (mMediaProjection == null) {
+            if (captureIntent == null) {
                 requestMediaProjection();
             } else {
-                startCapturing(mMediaProjection);
+                startCapturing();
             }
         } else if (Build.VERSION.SDK_INT >= M) {
             requestPermissions();
@@ -386,19 +360,42 @@ public class MainActivity extends Activity {
     }
 
     private void startRecorder() {
-        if (mRecorder == null) return;
-        mRecorder.start();
+        if (captureIntent == null) {
+            Log.e(TAG, "startRecording: callingIntent is null");
+            return;
+        }
+
+        recordCtrl.init(this, new MsgReceiver(), NOTIFICATION_ID, mNotification);
+//        mRecorder.start();
+        VideoEncodeConfig video = createVideoConfig();
+        AudioEncodeConfig audio = createAudioConfig(); // audio can be null
+        if (video == null) {
+            toast(getString(R.string.create_screenRecorder_failure));
+            return;
+        }
+
+        try {
+            recordCtrl.startRecord(captureIntent, video, audio);
+        } catch (IllegalStateException e) {
+            Toast.makeText(this, e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
         mButton.setText(getString(R.string.stop_recorder));
         registerReceiver(mStopActionReceiver, new IntentFilter(ACTION_STOP));
-        moveTaskToBack(true);
+//        moveTaskToBack(true);
     }
 
     private void stopRecorder() {
-        mNotifications.clear();
-        if (mRecorder != null) {
-            mRecorder.quit();
+//        mNotifications.clear();
+//        if (mRecorder != null) {
+//            mRecorder.quit();
+//        }
+//        mRecorder = null;
+        try {
+            recordCtrl.stopRecord();
+        } catch (IllegalStateException e) {
+            Toast.makeText(this, e.getMessage(), Toast.LENGTH_SHORT).show();
         }
-        mRecorder = null;
+
         mButton.setText(getString(R.string.restart_recorder));
         try {
             unregisterReceiver(mStopActionReceiver);
@@ -408,11 +405,10 @@ public class MainActivity extends Activity {
     }
 
     private void cancelRecorder() {
-        if (mRecorder == null) return;
+        if (recordCtrl == null) return;
         Toast.makeText(this, getString(R.string.permission_denied_screen_recorder_cancel), Toast.LENGTH_SHORT).show();
         stopRecorder();
     }
-
 
     private boolean hasLoadBatPermission() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
@@ -422,34 +418,34 @@ public class MainActivity extends Activity {
         return powerManager.isIgnoringBatteryOptimizations(this.getPackageName());
     }
 
+
     @TargetApi(M)
     private void requestPermissions() {
-        if (!Settings.canDrawOverlays(this)) {
-            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
-            startActivity(intent);
-            return;
-        }
-        if (!hasLoadBatPermission()) {
-            Intent intent = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
-            this.startActivity(intent);
-            return;
-        }
-        String[] permissions = mAudioToggle.isChecked()
-                ? new String[]{WRITE_EXTERNAL_STORAGE, RECORD_AUDIO}
-                : new String[]{WRITE_EXTERNAL_STORAGE};
+//        if (!Settings.canDrawOverlays(this)) {
+//            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
+//            startActivity(intent);
+//            return;
+//        }
+//        if (!hasLoadBatPermission()) {
+//            Intent intent = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+//            this.startActivity(intent);
+//            return;
+//        }
+        checkAndRequestPermissions();
+
         boolean showRationale = false;
-        for (String perm : permissions) {
+        for (String perm : appPermission) {
             showRationale |= shouldShowRequestPermissionRationale(perm);
         }
         if (!showRationale) {
-            requestPermissions(permissions, REQUEST_PERMISSIONS);
+            requestPermissions(appPermission, REQUEST_PERMISSIONS);
             return;
         }
         new AlertDialog.Builder(this)
                 .setMessage(getString(R.string.using_your_mic_to_record_audio))
                 .setCancelable(false)
                 .setPositiveButton(android.R.string.ok, (dialog, which) ->
-                        requestPermissions(permissions, REQUEST_PERMISSIONS))
+                        requestPermissions(appPermission, REQUEST_PERMISSIONS))
                 .setNegativeButton(android.R.string.cancel, null)
                 .create()
                 .show();
@@ -903,7 +899,7 @@ public class MainActivity extends Activity {
     }
 
     private void stopRecordingAndOpenFile(Context context) {
-        File file = new File(mRecorder.getSavedPath());
+        File file = new File(recordCtrl.getRecordPath());
         stopRecorder();
         Toast.makeText(context, getString(R.string.recorder_stopped_saved_file) + " " + file, Toast.LENGTH_LONG).show();
         StrictMode.VmPolicy vmPolicy = StrictMode.getVmPolicy();
@@ -938,4 +934,18 @@ public class MainActivity extends Activity {
             }
         }
     };
+
+    public static class MsgReceiver extends BroadcastReceiver {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            Log.d(TAG, "receive msg");
+            String errorMsg = intent.getStringExtra("error");
+            if (errorMsg != null) {
+                Log.d(TAG, "receive msg:" + errorMsg);
+                if (context instanceof MainActivity) {
+                    Toast.makeText(context, errorMsg, Toast.LENGTH_SHORT).show();
+                }
+            }
+        }
+    }
 }

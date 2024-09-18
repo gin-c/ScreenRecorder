@@ -17,6 +17,7 @@
 package net.yrom.screenrecorder;
 
 import android.hardware.display.VirtualDisplay;
+import android.media.AudioPlaybackCaptureConfiguration;
 import android.media.MediaCodec;
 import android.media.MediaFormat;
 import android.media.MediaMuxer;
@@ -46,7 +47,7 @@ public class ScreenRecorder {
     static final String AUDIO_AAC = MIMETYPE_AUDIO_AAC; // H.264 Advanced Audio Coding
     private String mDstPath;
     private VideoEncoder mVideoEncoder;
-    private MicRecorder mAudioEncoder;
+    private AudioPlaybackRecorder mAudioEncoder;
 
     private MediaFormat mVideoOutputFormat = null, mAudioOutputFormat = null;
     private int mVideoTrackIndex = INVALID_INDEX, mAudioTrackIndex = INVALID_INDEX;
@@ -73,11 +74,12 @@ public class ScreenRecorder {
     public ScreenRecorder(VideoEncodeConfig video,
                           AudioEncodeConfig audio,
                           VirtualDisplay display,
+                          AudioPlaybackCaptureConfiguration audioPlaybackCaptureConfiguration,
                           String dstPath) {
         mVirtualDisplay = display;
         mDstPath = dstPath;
         mVideoEncoder = new VideoEncoder(video);
-        mAudioEncoder = audio == null ? null : new MicRecorder(audio);
+        mAudioEncoder = audio == null ? null : new AudioPlaybackRecorder(audio, audioPlaybackCaptureConfiguration);
     }
 
     /**
@@ -377,7 +379,7 @@ public class ScreenRecorder {
     }
 
     private void prepareAudioEncoder() throws IOException {
-        final MicRecorder micRecorder = mAudioEncoder;
+        final AudioPlaybackRecorder micRecorder = mAudioEncoder;
         if (micRecorder == null) return;
         AudioEncoder.Callback callback = new AudioEncoder.Callback() {
             boolean ranIntoError = false;
@@ -405,7 +407,7 @@ public class ScreenRecorder {
             @Override
             public void onError(Encoder codec, Exception e) {
                 ranIntoError = true;
-                Log.e(TAG, "MicRecorder ran into an error! ", e);
+                Log.e(TAG, "AudioPlaybackRecorder ran into an error! ", e);
                 Message.obtain(mHandler, MSG_ERROR, e).sendToTarget();
             }
 

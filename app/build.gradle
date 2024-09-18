@@ -1,12 +1,12 @@
 apply plugin: 'com.android.application'
 
 android {
-    compileSdkVersion 28
+    compileSdkVersion 34
 
     defaultConfig {
         applicationId "net.yrom.screenrecorder.demo"
-        minSdkVersion 21
-        targetSdkVersion 28
+        minSdkVersion 29
+        targetSdkVersion 34
         versionCode app_version_code as int
         versionName app_version_name
 
@@ -36,4 +36,11 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+}
+
+dependencies {
+    implementation "androidx.annotation:annotation:$androidxAnnotationVersion"
+    implementation "androidx.core:core-ktx:$androidxCoreVersion"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlinVersion"
+    // for Hilt dependency injection
 }
