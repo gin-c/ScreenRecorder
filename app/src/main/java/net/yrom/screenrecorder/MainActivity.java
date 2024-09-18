@@ -110,7 +110,7 @@ public class MainActivity extends Activity {
     Notification mNotification = null;
     //    private Notifications mNotifications;
     Intent captureIntent = null;
-    private IRecordCtrl recordCtrl = new RecordCtrl();
+    private IRecordCtrl recordCtrl;
 
     NotificationCompat.Builder notificationBuilder;
     NotificationManager notificationManager;
@@ -344,7 +344,7 @@ public class MainActivity extends Activity {
     }
 
     private void onButtonClick(View v) {
-        if (recordCtrl.getRecordPath() != null) {
+        if (recordCtrl != null) {
             stopRecordingAndOpenFile(v.getContext());
         } else if (hasPermissions()) {
             if (captureIntent == null) {
@@ -364,7 +364,7 @@ public class MainActivity extends Activity {
             Log.e(TAG, "startRecording: callingIntent is null");
             return;
         }
-
+        recordCtrl = new RecordCtrl();
         recordCtrl.init(this, new MsgReceiver(), NOTIFICATION_ID, mNotification);
 //        mRecorder.start();
         VideoEncodeConfig video = createVideoConfig();
@@ -385,17 +385,13 @@ public class MainActivity extends Activity {
     }
 
     private void stopRecorder() {
-//        mNotifications.clear();
-//        if (mRecorder != null) {
-//            mRecorder.quit();
-//        }
-//        mRecorder = null;
         try {
             recordCtrl.stopRecord();
         } catch (IllegalStateException e) {
             Toast.makeText(this, e.getMessage(), Toast.LENGTH_SHORT).show();
         }
 
+        recordCtrl = null;
         mButton.setText(getString(R.string.restart_recorder));
         try {
             unregisterReceiver(mStopActionReceiver);
