@@ -1,9 +1,8 @@
 本项目来自：
+https://github.com/itchenning/ScreenRecorder
 https://github.com/yrom/ScreenRecorder
 
-基于此添加了<font color="red"><b>锁屏录屏</b></font>功能。
-
-同时支持<b>无声模式</b>和<b>有声模式</b>。
+基于此添加了<font color="red"><b>前台服务录制</b></font>功能。
 
 
 注意事项：
@@ -29,4 +28,5 @@ https://github.com/yrom/ScreenRecorder
 ## <font color="red">不允许</font>电量优化
 - 防止在锁屏上10秒之后<b>无法录屏</b>
 
-# 本项目佛系维护，提交需求看心情适配。
+## Android 12 
+- 前台服务录制
